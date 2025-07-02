@@ -5,7 +5,65 @@ import requests
 import pandas as pd
 from langchain_core.messages import HumanMessage
 from agent import build_graph
+import json
+from supabase import create_client
+import sys
+print("=== APP STARTUP ===", file=sys.stderr)
 
+
+DEFAULT_API_URL = "https://agents-course-unit4-scoring.hf.space"
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+SPACE_ID = os.getenv("SPACE_ID")
+
+# --- Initialize Supabase client ---
+supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+# --- Ingest data on startup ---
+def ingest_documents_from_csv(csv_path: str):
+    """
+    Очистить таблицу documents и загрузить записи из CSV файла.
+    CSV должен содержать колонки: content, metadata (JSON), embedding (JSON array).
+    """
+    # 1. Загрузить CSV
+    df = pd.read_csv(csv_path)
+    # 2. Подготовить записи
+    records = []
+    for _, row in df.iterrows():
+        try:
+            metadata = json.loads(row['metadata'])
+        except Exception:
+            metadata = {}
+        try:
+            embedding = json.loads(row['embedding'])
+        except Exception:
+            embedding = []
+        records.append({
+            'content': row['content'],
+            'metadata': metadata,
+            'embedding': embedding,
+        })
+    # 3. Очистить таблицу
+    print(f"Deleting existing documents...")
+    supabase.from_('documents').delete().neq('id', '').execute()
+    # 4. Вставить новые
+    if records:
+        print(f"Inserting {len(records)} documents from {csv_path}...")
+        res = supabase.from_('documents').insert(records).execute()
+        if res.error:
+            print("Error during ingestion:", res.error)
+        else:
+            print("Ingestion completed.")
+    else:
+        print("No records found in CSV to ingest.")
+
+# Выполнить ingestion при старте
+CSV_PATH = os.path.join(os.path.dirname(__file__), 'supabase_docs.csv')
+if os.path.exists(CSV_PATH):
+    pass
+    #ingest_documents_from_csv(CSV_PATH)
+else:
+    print(f"CSV file not found at {CSV_PATH}, skipping ingestion.")
 
 
 class BasicAgent:
